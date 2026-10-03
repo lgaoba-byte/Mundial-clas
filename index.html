@@ -965,15 +965,36 @@ function buildKnockout(){
   winners.sort((a,b)=> b.pts-a.pts || b.sg-a.sg || b.gp-a.gp);
   runnersUp.sort((a,b)=> b.pts-a.pts || b.sg-a.sg || b.gp-a.gp);
 
-  const seeds = [...winners, ...runnersUp]; // seed 1..8 (1-4 = líderes, 5-8 = vices)
   const seedTeam = (s)=> ({ club: s.club, name: s.name, wa: state.waNames[s.wa], group: s.group });
 
-  const quarters = [
-    { a: seedTeam(seeds[0]), b: seedTeam(seeds[7]), hs:null, as:null },
-    { a: seedTeam(seeds[3]), b: seedTeam(seeds[4]), hs:null, as:null },
-    { a: seedTeam(seeds[2]), b: seedTeam(seeds[5]), hs:null, as:null },
-    { a: seedTeam(seeds[1]), b: seedTeam(seeds[6]), hs:null, as:null },
-  ];
+  // Pareia cada líder de grupo com um vice de OUTRO grupo (nunca do mesmo grupo).
+  // Tenta manter o máximo possível da ordem de força original (melhor líder x pior
+  // vice, e assim por diante); só se afasta dela no mínimo necessário pra evitar
+  // dois times do mesmo grupo se enfrentando logo nas quartas.
+  function permutations(arr){
+    if(arr.length<=1) return [arr];
+    const result=[];
+    for(let i=0;i<arr.length;i++){
+      const rest = arr.slice(0,i).concat(arr.slice(i+1));
+      permutations(rest).forEach(p=> result.push([arr[i], ...p]));
+    }
+    return result;
+  }
+  const desiredOrder = [3,2,1,0]; // padrão: líder[0] x vice[3] (o mais fraco), líder[1] x vice[2]...
+  let bestPerm = null, bestScore = -1;
+  permutations([0,1,2,3]).forEach(perm=>{
+    const valid = perm.every((rIdx,i)=> winners[i].group !== runnersUp[rIdx].group);
+    if(!valid) return;
+    const score = perm.reduce((acc,rIdx,i)=> acc + (rIdx===desiredOrder[i]?1:0), 0);
+    if(score > bestScore){ bestScore = score; bestPerm = perm; }
+  });
+  const finalPerm = bestPerm || desiredOrder; // sempre existe solução válida com 4 grupos de 4
+
+  const quarters = [0,1,2,3].map(i=> ({
+    a: seedTeam(winners[i]),
+    b: seedTeam(runnersUp[finalPerm[i]]),
+    hs:null, as:null
+  }));
 
   state.knockout = {
     quarters,
