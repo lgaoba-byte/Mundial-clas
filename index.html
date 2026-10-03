@@ -343,6 +343,7 @@ table.standings tr.qualified td.teamCell::after{content:'🥇';margin-left:6px;f
       <div class="groupsGrid" id="groupsGrid"></div>
       <div class="setupActions">
         <button id="knockoutBtn" class="btn btnGold adminOnly" type="button" hidden>Montar mata-mata</button>
+        <button id="rebuildKnockoutBtn" class="btn btnGhost adminOnly" type="button" hidden>Remontar mata-mata</button>
       </div>
       <p class="status" id="groupsStatus"></p>
     </div>
@@ -929,10 +930,25 @@ function renderGroups(){
 
 function renderKnockoutButtonState(){
   const btn = document.getElementById('knockoutBtn');
-  if(!state.drawn){ btn.hidden = true; return; }
+  const rebuildBtn = document.getElementById('rebuildKnockoutBtn');
+  if(!state.drawn){ btn.hidden = true; rebuildBtn.hidden = true; return; }
   btn.hidden = !isAdmin || !!state.knockout;
   btn.disabled = !allGroupsComplete();
   btn.onclick = buildKnockout;
+  // sempre disponível pro admin, mesmo com mata-mata já montado — serve como saída de
+  // emergência caso os dados do mata-mata fiquem corrompidos (ex.: pelo Firebase) e o
+  // reparo automático em renderKnockout não seja suficiente; refaz do zero sem precisar
+  // sortear os grupos de novo (os placares da fase de grupos não são afetados)
+  rebuildBtn.hidden = !isAdmin || !allGroupsComplete();
+  rebuildBtn.onclick = ()=>{
+    openConfirmModal(
+      'Remontar mata-mata?',
+      'Isso recria as quartas, semi e final do zero (apaga os placares do mata-mata já lançados, se houver). Os placares da fase de grupos não são afetados.',
+      'Remontar',
+      buildKnockout,
+      true
+    );
+  };
   setStatus('groupsStatus', allGroupsComplete() ? '' : 'Complete todos os placares da fase de grupos para liberar o mata-mata.', '');
 }
 
@@ -961,8 +977,9 @@ function buildKnockout(){
 
   state.knockout = {
     quarters,
-    semis: [ {hs:null,as:null}, {hs:null,as:null} ],
-    final: { hs:null, as:null },
+    // 'round' nunca é nulo — evita que o Firebase apague o objeto inteiro quando hs/as estão vazios
+    semis: [ {round:'semi1', hs:null,as:null}, {round:'semi2', hs:null,as:null} ],
+    final: { round:'final', hs:null, as:null },
     champion: null
   };
   scheduleSave();
@@ -979,6 +996,23 @@ function renderKnockout(){
   const has = state.drawn && state.knockout;
   if(!has) return;
   const ko = state.knockout;
+
+  // auto-reparo: se semis/final tiverem sido apagados pelo Firebase (objeto só com
+  // valores nulos vira o nó inteiro removido), reconstrói sem perder quartas/placares
+  let repaired = false;
+  if(!Array.isArray(ko.semis) || ko.semis.length !== 2){
+    ko.semis = [ {round:'semi1', hs:null,as:null}, {round:'semi2', hs:null,as:null} ];
+    repaired = true;
+  }
+  ko.semis = ko.semis.map((s,i)=>{
+    if(!s || typeof s !== 'object') { repaired = true; return {round:'semi'+(i+1), hs:null, as:null}; }
+    return s;
+  });
+  if(!ko.final || typeof ko.final !== 'object'){
+    ko.final = {round:'final', hs:null, as:null};
+    repaired = true;
+  }
+  if(repaired) scheduleSave();
 
   const q1w = winnerOf(ko.quarters[0]);
   const q2w = winnerOf(ko.quarters[1]);
